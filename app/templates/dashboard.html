@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="de" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trademark Aggregator - Admin Dashboard</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Outfit', 'sans-serif'],
+                    },
+                }
+            }
+        }
+    </script>
+    <style>
+        body {
+            background: radial-gradient(circle at 50% 50%, #111827 0%, #030712 100%);
+        }
+        .glass {
+            background: rgba(17, 24, 39, 0.7);
+            backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+        .glass-highlight {
+            background: linear-gradient(135deg, rgba(59, 130, 246, 0.1) 0%, rgba(147, 51, 234, 0.1) 100%);
+            border: 1px solid rgba(59, 130, 246, 0.2);
+        }
+    </style>
+</head>
+<body class="text-gray-100 min-h-screen font-sans flex overflow-hidden">
+
+    <!-- Sidebar -->
+    <aside class="w-64 glass border-r border-gray-800 flex flex-col justify-between h-screen shrink-0">
+        <div>
+            <!-- Logo / Title -->
+            <div class="p-6 border-b border-gray-800 flex items-center gap-3">
+                <div class="h-10 w-10 rounded-xl bg-gradient-to-tr from-blue-500 to-purple-600 flex items-center justify-center shadow-lg shadow-blue-500/20">
+                    <i class="fa-solid fa-trademark text-lg text-white"></i>
+                </div>
+                <div>
+                    <h1 class="font-bold text-lg leading-tight bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-purple-400">TM Aggregator</h1>
+                    <span class="text-xs text-gray-500">v1.0.0 Admin</span>
+                </div>
+            </div>
+            
+            <!-- Navigation -->
+            <nav class="p-4 space-y-2">
+                <a href="/admin/dashboard" class="flex items-center gap-3 px-4 py-3 rounded-xl bg-blue-600 text-white font-medium transition-all shadow-lg shadow-blue-500/10">
+                    <i class="fa-solid fa-chart-pie text-lg"></i>
+                    <span>Dashboard</span>
+                </a>
+                <a href="/admin/playground" class="flex items-center gap-3 px-4 py-3 rounded-xl text-gray-400 hover:text-white hover:bg-gray-800/50 transition-all">
+                    <i class="fa-solid fa-vial text-lg"></i>
+                    <span>Test Playground</span>
+                </a>
+            </nav>
+        </div>
+
+        <!-- System Info Sidebar Bottom -->
+        <div class="p-4 border-t border-gray-800">
+            <div class="flex items-center gap-3 bg-gray-900/50 p-3 rounded-xl border border-gray-800/80">
+                <div class="h-3 w-3 rounded-full bg-green-500 animate-pulse"></div>
+                <div class="text-xs">
+                    <p class="font-medium text-gray-300">Server Status: Online</p>
+                    <p class="text-gray-500">KVM Hostinger VPS</p>
+                </div>
+            </div>
+        </div>
+    </aside>
+
+    <!-- Main Content Area -->
+    <main class="flex-1 flex flex-col h-screen overflow-y-auto">
+        <!-- Topbar -->
+        <header class="h-16 border-b border-gray-800 flex items-center justify-between px-8 glass shrink-0">
+            <h2 class="text-xl font-semibold">Dashboard Übersicht</h2>
+            <div class="flex items-center gap-4">
+                <div class="text-right">
+                    <p class="text-sm font-medium text-gray-300">Alex Janssen</p>
+                    <p class="text-xs text-gray-500">Administrator</p>
+                </div>
+                <div class="h-10 w-10 rounded-full bg-gray-800 border border-gray-700 flex items-center justify-center font-bold text-blue-400 shadow-md">
+                    AJ
+                </div>
+            </div>
+        </header>
+
+        <!-- Dashboard Content -->
+        <div class="p-8 space-y-8 flex-1">
+            
+            <!-- Metric Cards -->
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-6">
+                <!-- Card 1 -->
+                <div class="glass p-6 rounded-2xl flex items-center justify-between shadow-xl">
+                    <div class="space-y-2">
+                        <span class="text-sm text-gray-400 font-medium">USPTO Datenbank</span>
+                        <h3 class="text-3xl font-bold text-blue-400">{{ uspto_count }}</h3>
+                        <p class="text-xs text-gray-500">Gespiegelte Marken</p>
+                    </div>
+                    <div class="h-12 w-12 rounded-xl bg-blue-500/10 flex items-center justify-center border border-blue-500/20">
+                        <i class="fa-solid fa-database text-blue-400 text-xl"></i>
+                    </div>
+                </div>
+
+                <!-- Card 2 -->
+                <div class="glass p-6 rounded-2xl flex items-center justify-between shadow-xl">
+                    <div class="space-y-2">
+                        <span class="text-sm text-gray-400 font-medium">EUIPO Cache</span>
+                        <h3 class="text-3xl font-bold text-purple-400">{{ euipo_cache_count }}</h3>
+                        <p class="text-xs text-gray-500">Einträge (&lt; 7 Tage alt)</p>
+                    </div>
+                    <div class="h-12 w-12 rounded-xl bg-purple-500/10 flex items-center justify-center border border-purple-500/20">
+                        <i class="fa-solid fa-bolt text-purple-400 text-xl"></i>
+                    </div>
+                </div>
+
+                <!-- Card 3 -->
+                <div class="glass p-6 rounded-2xl flex items-center justify-between shadow-xl">
+                    <div class="space-y-2">
+                        <span class="text-sm text-gray-400 font-medium">Gesamt-Anfragen</span>
+                        <h3 class="text-3xl font-bold text-green-400" id="total-requests">0</h3>
+                        <p class="text-xs text-gray-500">Seit Systemstart</p>
+                    </div>
+                    <div class="h-12 w-12 rounded-xl bg-green-500/10 flex items-center justify-center border border-green-500/20">
+                        <i class="fa-solid fa-chart-line text-green-400 text-xl"></i>
+                    </div>
+                </div>
+
+                <!-- Card 4 -->
+                <div class="glass p-6 rounded-2xl flex items-center justify-between shadow-xl">
+                    <div class="space-y-2">
+                        <span class="text-sm text-gray-400 font-medium">Cache-Hitrate</span>
+                        <h3 class="text-3xl font-bold text-amber-400" id="cache-hitrate">0%</h3>
+                        <p class="text-xs text-gray-500">Effizienzwert</p>
+                    </div>
+                    <div class="h-12 w-12 rounded-xl bg-amber-500/10 flex items-center justify-center border border-amber-500/20">
+                        <i class="fa-solid fa-server text-amber-400 text-xl"></i>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Middle Section: Import Manager & Charts -->
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                <!-- Import Manager (2 Columns Width on lg) -->
+                <div class="glass p-6 rounded-2xl lg:col-span-2 flex flex-col justify-between shadow-xl relative overflow-hidden">
+                    <div class="space-y-4">
+                        <div class="flex items-center justify-between border-b border-gray-800 pb-4">
+                            <h4 class="text-lg font-semibold flex items-center gap-2">
+                                <i class="fa-solid fa-arrows-rotate text-blue-500"></i>
+                                USPTO Daten-Manager
+                            </h4>
+                            <span class="px-3 py-1 rounded-full text-xs font-semibold bg-gray-800 border border-gray-700 text-gray-300 flex items-center gap-2" id="import-status-badge">
+                                <span class="h-2 w-2 rounded-full bg-gray-500"></span>
+                                Bereit
+                            </span>
+                        </div>
+
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 pt-2">
+                            <div class="space-y-2">
+                                <p class="text-sm text-gray-400">Letzter erfolgreicher Import:</p>
+                                <p class="font-medium" id="last-sync-date">-</p>
+                                <p class="text-xs text-gray-500">Importiert wöchentliche USPTO XML Updates</p>
+                            </div>
+                            <div class="space-y-2">
+                                <p class="text-sm text-gray-400">Nächster geplanter Sync:</p>
+                                <p class="font-medium text-purple-400">Jeden Sonntag um 02:00 Uhr</p>
+                                <p class="text-xs text-gray-500">Automatische Hintergrund-Aufgabe</p>
+                            </div>
+                        </div>
+
+                        <!-- Progress Bar (Visible only during import) -->
+                        <div id="import-progress-container" class="hidden space-y-2 mt-4">
+                            <div class="flex justify-between text-xs text-gray-400">
+                                <span>Verarbeite XML-Dateien...</span>
+                                <span id="import-progress-percent">0%</span>
+                            </div>
+                            <div class="w-full bg-gray-800 rounded-full h-2 overflow-hidden border border-gray-700">
+                                <div id="import-progress-bar" class="bg-gradient-to-r from-blue-500 to-purple-600 h-full transition-all duration-300" style="width: 0%"></div>
+                            </div>
+                        </div>
+
+                        <!-- Import Logs Area -->
+                        <div class="mt-4">
+                            <p class="text-xs text-gray-400 mb-2">Import Logs:</p>
+                            <div id="import-logs" class="bg-black/40 border border-gray-800/80 rounded-xl p-4 h-32 overflow-y-auto font-mono text-xs text-gray-500 space-y-1">
+                                <div>[System] Bereit für manuelle Steuerung.</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="flex items-center justify-between border-t border-gray-800 pt-6 mt-6">
+                        <p class="text-xs text-gray-500 max-w-md">Der Import läuft asynchron im Hintergrund. Die API bleibt während des Imports vollständig erreichbar.</p>
+                        <button onclick="startImport()" id="start-import-btn" class="px-6 py-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 font-medium text-sm transition-all shadow-lg shadow-blue-500/20 active:scale-98">
+                            <i class="fa-solid fa-play mr-2"></i> Sync manuell starten
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Cache chart (1 Column Width) -->
+                <div class="glass p-6 rounded-2xl flex flex-col justify-between shadow-xl">
+                    <h4 class="text-lg font-semibold border-b border-gray-800 pb-4 flex items-center gap-2">
+                        <i class="fa-solid fa-pie-chart text-purple-500"></i>
+                        Cache-Effizienz
+                    </h4>
+                    <div class="my-6 relative flex items-center justify-center" style="height: 180px;">
+                        <canvas id="cacheChart"></canvas>
+                    </div>
+                    <div class="flex justify-around text-xs text-gray-400 border-t border-gray-800 pt-4">
+                        <div class="text-center">
+                            <div class="h-2 w-8 rounded-full bg-blue-500 mx-auto mb-1"></div>
+                            <p>Cache Hit</p>
+                        </div>
+                        <div class="text-center">
+                            <div class="h-2 w-8 rounded-full bg-purple-500 mx-auto mb-1"></div>
+                            <p>API Call</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Lower Section: Recent Queries Log Table -->
+            <div class="glass p-6 rounded-2xl shadow-xl">
+                <h4 class="text-lg font-semibold border-b border-gray-800 pb-4 mb-4 flex items-center gap-2">
+                    <i class="fa-solid fa-list-check text-green-500"></i>
+                    Letzte Suchanfragen
+                </h4>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left border-collapse">
+                        <thead>
+                            <tr class="border-b border-gray-800 text-xs font-semibold text-gray-400 uppercase">
+                                <th class="py-3 px-4">Zeitstempel</th>
+                                <th class="py-3 px-4">Endpoint</th>
+                                <th class="py-3 px-4">Suchbegriff (Keyword)</th>
+                                <th class="py-3 px-4">Datenquelle (Cache-Hit)</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-gray-800 text-sm text-gray-300">
+                            {% for stat in stats %}
+                            <tr>
+                                <td class="py-3 px-4 text-gray-500 font-mono text-xs">{{ stat.timestamp.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+                                <td class="py-3 px-4 font-mono text-xs">{{ stat.endpoint }}</td>
+                                <td class="py-3 px-4 font-medium text-white">{{ stat.keyword }}</td>
+                                <td class="py-3 px-4">
+                                    {% if stat.cache_hit %}
+                                    <span class="px-2 py-0.5 rounded text-xs bg-blue-500/10 border border-blue-500/30 text-blue-400">Cache Hit</span>
+                                    {% else %}
+                                    <span class="px-2 py-0.5 rounded text-xs bg-purple-500/10 border border-purple-500/30 text-purple-400">API Call</span>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% else %}
+                            <tr>
+                                <td colspan="4" class="py-6 text-center text-gray-500">Noch keine API-Abfragen verzeichnet.</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+        </div>
+    </main>
+
+    <!-- JS Logic -->
+    <script>
+        // Data derived from server stats
+        const rawStats = [
+            {% for stat in stats %}
+            { cache_hit: {{ 'true' if stat.cache_hit else 'false' }} },
+            {% endfor %}
+        ];
+        
+        const total = rawStats.length;
+        const hits = rawStats.filter(s => s.cache_hit).length;
+        const misses = total - hits;
+        
+        const hitrate = total > 0 ? Math.round((hits / total) * 100) : 0;
+        
+        // Set dynamic metrics
+        document.getElementById('total-requests').innerText = total;
+        document.getElementById('cache-hitrate').innerText = hitrate + '%';
+
+        // Render efficiency Chart
+        const ctx = document.getElementById('cacheChart').getContext('2d');
+        new Chart(ctx, {
+            type: 'doughnut',
+            data: {
+                labels: ['Cache Hit', 'API Call'],
+                datasets: [{
+                    data: [hits || 1, misses || 0],
+                    backgroundColor: ['#3b82f6', '#8b5cf6'],
+                    borderWidth: 0,
+                }]
+            },
+            options: {
+                plugins: {
+                    legend: { display: false }
+                },
+                cutout: '80%',
+                responsive: true,
+                maintainAspectRatio: false
+            }
+        });
+
+        // Backend Integration for Import Manager
+        let isPolling = false;
+
+        async function checkStatus() {
+            try {
+                const response = await fetch('/admin/import/status');
+                const status = await response.json();
+                
+                updateUI(status);
+                
+                if (status.running) {
+                    if (!isPolling) {
+                        isPolling = true;
+                        startPolling();
+                    }
+                } else {
+                    isPolling = false;
+                }
+            } catch (err) {
+                console.error("Error fetching import status:", err);
+            }
+        }
+
+        function updateUI(status) {
+            const btn = document.getElementById('start-import-btn');
+            const progressContainer = document.getElementById('import-progress-container');
+            const progressBar = document.getElementById('import-progress-bar');
+            const progressPercent = document.getElementById('import-progress-percent');
+            const badge = document.getElementById('import-status-badge');
+            const logsContainer = document.getElementById('import-logs');
+            const lastSyncText = document.getElementById('last-sync-date');
+
+            if (status.running) {
+                btn.disabled = true;
+                btn.classList.add('opacity-50');
+                btn.innerHTML = '<i class="fa-solid fa-spinner animate-spin mr-2"></i> Sync läuft...';
+                progressContainer.classList.remove('hidden');
+                progressBar.style.width = status.progress + '%';
+                progressPercent.innerText = status.progress + '%';
+                badge.innerHTML = '<span class="h-2.5 w-2.5 rounded-full bg-blue-500 animate-pulse"></span> Synchronisiere';
+            } else {
+                btn.disabled = false;
+                btn.classList.remove('opacity-50');
+                btn.innerHTML = '<i class="fa-solid fa-play mr-2"></i> Sync manuell starten';
+                progressContainer.classList.add('hidden');
+                badge.innerHTML = '<span class="h-2.5 w-2.5 rounded-full bg-green-500"></span> Bereit';
+            }
+
+            if (status.last_run) {
+                lastSyncText.innerText = new Date(status.last_run).toLocaleString();
+            } else {
+                lastSyncText.innerText = 'Nie';
+            }
+
+            // Update Logs
+            if (status.logs && status.logs.length > 0) {
+                logsContainer.innerHTML = '';
+                status.logs.forEach(log => {
+                    const div = document.createElement('div');
+                    div.innerText = log;
+                    // Stylize errors in log red
+                    if (log.includes("FEHLER") || log.includes("error") || log.includes("Error")) {
+                        div.className = "text-red-400";
+                    }
+                    logsContainer.appendChild(div);
+                });
+                logsContainer.scrollTop = logsContainer.scrollHeight;
+            }
+        }
+
+        function startPolling() {
+            const pollInterval = setInterval(async () => {
+                await checkStatus();
+                if (!isPolling) {
+                    clearInterval(pollInterval);
+                    // Refresh metrics on completion
+                    setTimeout(() => {
+                        location.reload();
+                    }, 1500);
+                }
+            }, 1000);
+        }
+
+        async function startImport() {
+            try {
+                const response = await fetch('/admin/import/trigger', { method: 'POST' });
+                if (response.ok) {
+                    await checkStatus();
+                } else {
+                    const err = await response.json();
+                    alert(`Sync konnte nicht gestartet werden: ${err.detail}`);
+                }
+            } catch (err) {
+                alert(`Fehler beim Senden des Startbefehls: ${err.message}`);
+            }
+        }
+
+        // Initialize status check on page load
+        checkStatus();
+
+    </script>
+</body>
+</html>

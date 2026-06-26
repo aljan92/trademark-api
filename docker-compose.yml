@@ -1,0 +1,37 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres_pass}
+      POSTGRES_DB: ${DB_NAME:-trademarks}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  web:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql://${DB_USER:-postgres}:${DB_PASSWORD:-postgres_pass}@db:5432/${DB_NAME:-trademarks}
+      EUIPO_CLIENT_ID: ${EUIPO_CLIENT_ID:-}
+      EUIPO_CLIENT_SECRET: ${EUIPO_CLIENT_SECRET:-}
+      EUIPO_SANDBOX: ${EUIPO_SANDBOX:-true}
+      TRAEFIK_HOST: ${TRAEFIK_HOST:-localhost}
+    depends_on:
+      - db
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.trademark-api.rule=Host(`trademark-api.${TRAEFIK_HOST}`)
+      - traefik.http.routers.trademark-api.entrypoints=websecure
+      - traefik.http.routers.trademark-api.tls.certresolver=letsencrypt
+      - traefik.http.services.trademark-api.loadbalancer.server.port=8000
+
+volumes:
+  postgres_data:
