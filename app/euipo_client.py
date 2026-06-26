@@ -22,11 +22,7 @@ BASE_URL = (
     if USE_SANDBOX
     else "https://api.euipo.europa.eu/trademark-search"
 )
-TOKEN_URL = (
-    "https://dev-sandbox.euipo.europa.eu/oauth2/token"
-    if USE_SANDBOX
-    else "https://api-gateway.euipo.europa.eu/oauth2/token"
-)
+TOKEN_URL = "https://euipo.europa.eu/cas-server-webapp/oidc/accessToken"
 
 # Global lock to serialize all EUIPO API requests to prevent concurrent bursts
 euipo_lock = asyncio.Lock()
