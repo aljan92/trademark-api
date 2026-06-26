@@ -153,7 +153,13 @@
                                 <i class="fa-solid fa-euro-sign text-lg mb-1 text-gray-400"></i>
                                 <span class="text-xs font-semibold">EUIPO (EU)</span>
                             </label>
-                        </div>
+                    <!-- Include Raw Checkbox -->
+                    <div class="flex items-center gap-3 bg-gray-900/40 p-3 rounded-xl border border-gray-800/80 mt-4">
+                        <input type="checkbox" id="include_raw" class="h-4 w-4 rounded border-gray-800 bg-gray-900 text-blue-600 focus:ring-blue-500 accent-blue-500 cursor-pointer">
+                        <label for="include_raw" class="text-sm text-gray-300 font-medium cursor-pointer selection:bg-transparent flex items-center gap-2">
+                            <i class="fa-solid fa-bug text-xs text-blue-500"></i>
+                            Originale EUIPO-Antwort (RAW) einbetten
+                        </label>
                     </div>
                 </div>
 
@@ -211,6 +217,7 @@
             const matchType = document.getElementById('match_type').value;
             const niceClass = document.getElementById('nice_class').value;
             const office = document.querySelector('input[name="office"]:checked').value;
+            const includeRaw = document.getElementById('include_raw').checked;
             const btn = document.getElementById('send-btn');
             const jsonWindow = document.getElementById('json-window');
             const statusBadge = document.getElementById('response-status');
@@ -234,6 +241,9 @@
             let url = `/v1/check-trademark?keyword=${encodeURIComponent(keyword)}&match_type=${matchType}&office=${office}`;
             if (niceClass) {
                 url += `&nice_class=${niceClass}`;
+            }
+            if (includeRaw) {
+                url += `&include_raw=true`;
             }
 
             try {

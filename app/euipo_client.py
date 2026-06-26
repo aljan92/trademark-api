@@ -47,7 +47,7 @@ def get_access_token():
         logger.error(f"Error fetching EUIPO access token: {str(e)}")
         return None
 
-async def query_euipo_live(keyword: str, nice_class: int = None, match_type: str = "exact"):
+async def query_euipo_live(keyword: str, nice_class: int = None, match_type: str = "exact", return_raw: bool = False):
     """Query the EUIPO Trade Mark Search API with rate limiting and serialization."""
     async with euipo_lock:
         # Rate limit safety sleep
@@ -56,7 +56,10 @@ async def query_euipo_live(keyword: str, nice_class: int = None, match_type: str
         token = get_access_token()
         if not token:
             logger.info(f"Using mock EUIPO data for keyword: '{keyword}' (No credentials provided)")
-            return mock_euipo_response(keyword, nice_class, match_type)
+            mock_data = mock_euipo_response(keyword, nice_class, match_type)
+            if return_raw:
+                return mock_data, {"source": "mock_fallback_no_token", "trademarks": mock_data}
+            return mock_data
             
         headers = {
             "Authorization": f"Bearer {token}",
@@ -102,8 +105,14 @@ async def query_euipo_live(keyword: str, nice_class: int = None, match_type: str
                         pass
                 
                 if response.status_code == 200:
-                    return parse_euipo_response(response.json(), keyword)
+                    raw_data = response.json()
+                    parsed_data = parse_euipo_response(raw_data, keyword)
+                    if return_raw:
+                        return parsed_data, raw_data
+                    return parsed_data
                 elif response.status_code == 404:
+                    if return_raw:
+                        return [], {"source": "euipo_api", "status_code": 404, "message": "No trademarks found"}
                     return []
                 elif response.status_code == 429:
                     retry_after_str = response.headers.get("Retry-After")
@@ -118,16 +127,25 @@ async def query_euipo_live(keyword: str, nice_class: int = None, match_type: str
                     continue
                 else:
                     logger.error(f"EUIPO API error: {response.status_code} - {response.text}")
-                    return mock_euipo_response(keyword, nice_class, match_type)
+                    mock_data = mock_euipo_response(keyword, nice_class, match_type)
+                    if return_raw:
+                        return mock_data, {"source": "mock_fallback_api_error", "status_code": response.status_code, "error": response.text, "trademarks": mock_data}
+                    return mock_data
             except Exception as e:
                 logger.error(f"Connection to EUIPO failed on attempt {attempt}: {str(e)}")
                 if attempt < max_retries:
                     await asyncio.sleep(1)
                 else:
-                    return mock_euipo_response(keyword, nice_class, match_type)
+                    mock_data = mock_euipo_response(keyword, nice_class, match_type)
+                    if return_raw:
+                        return mock_data, {"source": "mock_fallback_connection_failed", "error": str(e), "trademarks": mock_data}
+                    return mock_data
                     
         logger.warning(f"All {max_retries} attempts failed to query EUIPO. Falling back to mock data.")
-        return mock_euipo_response(keyword, nice_class, match_type)
+        mock_data = mock_euipo_response(keyword, nice_class, match_type)
+        if return_raw:
+            return mock_data, {"source": "mock_fallback_attempts_exhausted", "trademarks": mock_data}
+        return mock_data
 
 def parse_euipo_response(json_data, keyword):
     """Parse EUIPO API JSON structure into our standardized format."""

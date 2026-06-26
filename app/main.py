@@ -133,11 +133,13 @@ async def check_trademark(
     match_type: str = Query("exact", description="exact or phrase"),
     nice_class: int = Query(None, description="Optional Nice class filter"),
     office: str = Query("both", description="uspto, euipo, or both"),
+    include_raw: bool = Query(False, description="Include raw responses for debug"),
     db: Session = Depends(get_db)
 ):
     office = office.lower()
     details = []
     cache_hit = False
+    raw_euipo = None
 
     # 1. USPTO Search (Local Mirror)
     if office in ("both", "uspto"):
@@ -181,11 +183,20 @@ async def check_trademark(
             # Cache Hit!
             euipo_results = json.loads(cache_entry.data)
             cache_hit = True
+            if include_raw:
+                raw_euipo = {
+                    "source": "cache",
+                    "cached_at": cache_entry.last_updated.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    "trademarks": euipo_results
+                }
         else:
             # Cache Miss / Expired -> Query Live API
             # Note: We query the live API without nice_class filter to cache all classes for this keyword
             try:
-                euipo_results = await query_euipo_live(keyword, match_type=match_type)
+                if include_raw:
+                    euipo_results, raw_euipo = await query_euipo_live(keyword, match_type=match_type, return_raw=True)
+                else:
+                    euipo_results = await query_euipo_live(keyword, match_type=match_type, return_raw=False)
                 
                 # Update Cache
                 if cache_entry:
@@ -207,6 +218,12 @@ async def check_trademark(
                 if cache_entry:
                     euipo_results = json.loads(cache_entry.data)
                     cache_hit = True
+                    if include_raw:
+                        raw_euipo = {
+                            "source": "cache_fallback_due_to_error",
+                            "error": str(e),
+                            "trademarks": euipo_results
+                        }
                 else:
                     raise e
                     
@@ -230,7 +247,7 @@ async def check_trademark(
     db.add(stat_entry)
     db.commit()
 
-    return {
+    response_body = {
         "meta": {
             "timestamp": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
             "status_code": 200,
@@ -248,4 +265,9 @@ async def check_trademark(
         },
         "details": details
     }
+    
+    if include_raw:
+        response_body["raw_euipo_response"] = raw_euipo
+        
+    return response_body
 
