@@ -4,6 +4,12 @@ import asyncio
 import requests
 from datetime import datetime
 
+class EUIPOAPIError(Exception):
+    def __init__(self, status_code: int, message: str):
+        self.status_code = status_code
+        self.message = message
+        super().__init__(f"EUIPO API Error ({status_code}): {message}")
+
 logger = logging.getLogger("euipo_client")
 
 # Fetch credentials from environment
@@ -53,13 +59,12 @@ async def query_euipo_live(keyword: str, nice_class: int = None, match_type: str
         # Rate limit safety sleep
         await asyncio.sleep(0.2)
         
+        if not CLIENT_ID or not CLIENT_SECRET:
+            raise EUIPOAPIError(400, "EUIPO-Zugangsdaten (CLIENT_ID oder CLIENT_SECRET) fehlen in den Umgebungsvariablen.")
+            
         token = get_access_token()
         if not token:
-            logger.info(f"Using mock EUIPO data for keyword: '{keyword}' (No credentials provided)")
-            mock_data = mock_euipo_response(keyword, nice_class, match_type)
-            if return_raw:
-                return mock_data, {"source": "mock_fallback_no_token", "trademarks": mock_data}
-            return mock_data
+            raise EUIPOAPIError(401, "Authentifizierung an der EUIPO-API fehlgeschlagen (Token konnte nicht generiert werden).")
             
         headers = {
             "Authorization": f"Bearer {token}",
@@ -127,25 +132,15 @@ async def query_euipo_live(keyword: str, nice_class: int = None, match_type: str
                     continue
                 else:
                     logger.error(f"EUIPO API error: {response.status_code} - {response.text}")
-                    mock_data = mock_euipo_response(keyword, nice_class, match_type)
-                    if return_raw:
-                        return mock_data, {"source": "mock_fallback_api_error", "status_code": response.status_code, "error": response.text, "trademarks": mock_data}
-                    return mock_data
-            except Exception as e:
+                    raise EUIPOAPIError(response.status_code, response.text)
+            except requests.RequestException as e:
                 logger.error(f"Connection to EUIPO failed on attempt {attempt}: {str(e)}")
                 if attempt < max_retries:
                     await asyncio.sleep(1)
                 else:
-                    mock_data = mock_euipo_response(keyword, nice_class, match_type)
-                    if return_raw:
-                        return mock_data, {"source": "mock_fallback_connection_failed", "error": str(e), "trademarks": mock_data}
-                    return mock_data
+                    raise EUIPOAPIError(503, f"Verbindung zur EUIPO-Schnittstelle fehlgeschlagen: {str(e)}")
                     
-        logger.warning(f"All {max_retries} attempts failed to query EUIPO. Falling back to mock data.")
-        mock_data = mock_euipo_response(keyword, nice_class, match_type)
-        if return_raw:
-            return mock_data, {"source": "mock_fallback_attempts_exhausted", "trademarks": mock_data}
-        return mock_data
+        raise EUIPOAPIError(429, "Alle Versuche, die EUIPO-Schnittstelle abzufragen, schlugen aufgrund von Rate Limits fehl.")
 
 def parse_euipo_response(json_data, keyword):
     """Parse EUIPO API JSON structure into our standardized format."""

@@ -125,7 +125,7 @@ async def read_playground(request: Request):
 import json
 from datetime import datetime, timedelta
 from sqlalchemy import func
-from app.euipo_client import query_euipo_live
+from app.euipo_client import query_euipo_live, EUIPOAPIError
 
 @app.get("/v1/check-trademark")
 async def check_trademark(
@@ -212,9 +212,30 @@ async def check_trademark(
                     )
                     db.add(new_cache)
                 db.commit()
-            except Exception as e:
+            except EUIPOAPIError as e:
                 db.rollback()
                 # If the API is completely down, use old cache as fallback if available
+                if cache_entry:
+                    euipo_results = json.loads(cache_entry.data)
+                    cache_hit = True
+                    if include_raw:
+                        raw_euipo = {
+                            "source": "cache_fallback_due_to_error",
+                            "error": e.message,
+                            "status_code": e.status_code,
+                            "trademarks": euipo_results
+                        }
+                else:
+                    raise HTTPException(
+                        status_code=502,
+                        detail={
+                            "error": "EUIPO API Fehler",
+                            "status_code": e.status_code,
+                            "message": e.message
+                        }
+                    )
+            except Exception as e:
+                db.rollback()
                 if cache_entry:
                     euipo_results = json.loads(cache_entry.data)
                     cache_hit = True
@@ -225,7 +246,10 @@ async def check_trademark(
                             "trademarks": euipo_results
                         }
                 else:
-                    raise e
+                    raise HTTPException(
+                        status_code=500,
+                        detail=f"Unerwarteter Fehler bei EUIPO-Abfrage: {str(e)}"
+                    )
                     
         # Filter EUIPO results by Nice class in Python if class is specified
         for tm in euipo_results:
