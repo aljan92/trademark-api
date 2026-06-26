@@ -64,6 +64,7 @@ async def query_euipo_live(keyword: str, nice_class: int = None, match_type: str
             
         headers = {
             "Authorization": f"Bearer {token}",
+            "X-IBM-Client-Id": CLIENT_ID,
             "Content-Type": "application/json",
             "Accept": "application/json"
         }
