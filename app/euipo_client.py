@@ -18,11 +18,15 @@ CLIENT_SECRET = os.getenv("EUIPO_CLIENT_SECRET", "")
 USE_SANDBOX = os.getenv("EUIPO_SANDBOX", "true").lower() == "true"
 
 BASE_URL = (
-    "https://dev-sandbox.euipo.europa.eu/trademark-search"
+    "https://api-sandbox.euipo.europa.eu/trademark-search"
     if USE_SANDBOX
     else "https://api.euipo.europa.eu/trademark-search"
 )
-TOKEN_URL = "https://euipo.europa.eu/cas-server-webapp/oidc/accessToken"
+TOKEN_URL = (
+    "https://auth-sandbox.euipo.europa.eu/oidc/accessToken"
+    if USE_SANDBOX
+    else "https://euipo.europa.eu/cas-server-webapp/oidc/accessToken"
+)
 
 # Global lock to serialize all EUIPO API requests to prevent concurrent bursts
 euipo_lock = asyncio.Lock()
