@@ -26,6 +26,8 @@ services:
       TRAEFIK_HOST: ${TRAEFIK_HOST:-localhost}
     depends_on:
       - db
+    volumes:
+      - ./scratch:/app/scratch
     labels:
       - traefik.enable=true
       - traefik.http.routers.trademark-api.rule=Host(`trademark-api.${TRAEFIK_HOST}`)
