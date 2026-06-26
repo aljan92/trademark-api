@@ -168,20 +168,41 @@
                             </span>
                         </div>
 
-                        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 pt-2">
+                        <!-- Update verfügbar Banner -->
+                        <div id="update-banner" class="p-4 rounded-xl bg-gray-800/50 border border-gray-700 text-gray-300 text-sm">
+                            <i class="fa-solid fa-spinner animate-spin mr-2"></i> Prüfe USPTO Status...
+                        </div>
+
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 pt-2">
                             <div class="space-y-2">
                                 <p class="text-sm text-gray-400">Letzter erfolgreicher Import:</p>
                                 <p class="font-medium" id="last-sync-date">-</p>
-                                <p class="text-xs text-gray-500">Importiert wöchentliche USPTO XML Updates</p>
+                                <p class="text-xs text-gray-500">Zeitstempel des letzten Imports</p>
                             </div>
                             <div class="space-y-2">
-                                <p class="text-sm text-gray-400">Nächster geplanter Sync:</p>
-                                <p class="font-medium text-purple-400">Jeden Sonntag um 02:00 Uhr</p>
-                                <p class="text-xs text-gray-500">Automatische Hintergrund-Aufgabe</p>
+                                <p class="text-sm text-gray-400">Zuletzt importierte Datei:</p>
+                                <p class="font-medium text-blue-400 font-mono text-sm">{{ last_imported_file }}</p>
+                                <p class="text-xs text-gray-500">Aktueller Datenbankstand</p>
+                            </div>
+                            <div class="space-y-2">
+                                <p class="text-sm text-gray-400">Synchronisations-Modus:</p>
+                                <p class="font-medium text-purple-400">Komplett Manuell (Testphase)</p>
+                                <p class="text-xs text-gray-500">Toggles werden später aktiviert</p>
                             </div>
                         </div>
 
-                        <!-- Progress Bar (Visible only during import) -->
+                        <!-- Download Progress Bar -->
+                        <div id="download-progress-container" class="hidden space-y-2 mt-4">
+                            <div class="flex justify-between text-xs text-gray-400">
+                                <span>Lade ZIP-Bulk-Datei von USPTO herunter...</span>
+                                <span id="download-progress-percent">0%</span>
+                            </div>
+                            <div class="w-full bg-gray-800 rounded-full h-2 overflow-hidden border border-gray-700">
+                                <div id="download-progress-bar" class="bg-gradient-to-r from-yellow-500 to-amber-500 h-full transition-all duration-300" style="width: 0%"></div>
+                            </div>
+                        </div>
+
+                        <!-- Import Progress Bar -->
                         <div id="import-progress-container" class="hidden space-y-2 mt-4">
                             <div class="flex justify-between text-xs text-gray-400">
                                 <span>Verarbeite XML-Dateien...</span>
@@ -201,11 +222,22 @@
                         </div>
                     </div>
 
-                    <div class="flex items-center justify-between border-t border-gray-800 pt-6 mt-6">
-                        <p class="text-xs text-gray-500 max-w-md">Der Import läuft asynchron im Hintergrund. Die API bleibt während des Imports vollständig erreichbar.</p>
-                        <button onclick="startImport()" id="start-import-btn" class="px-6 py-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 font-medium text-sm transition-all shadow-lg shadow-blue-500/20 active:scale-98">
-                            <i class="fa-solid fa-play mr-2"></i> Sync manuell starten
-                        </button>
+                    <div class="flex flex-col sm:flex-row items-center justify-between gap-4 border-t border-gray-800 pt-6 mt-6">
+                        <p class="text-xs text-gray-500 max-w-sm">Starte zuerst den Download (Schritt 1) und führe anschließend das Datenbank-Update aus (Schritt 2).</p>
+                        
+                        <div class="flex flex-wrap gap-3">
+                            <button onclick="checkUpdate()" id="check-update-btn" class="px-4 py-2.5 rounded-xl border border-gray-700 hover:bg-gray-800 font-medium text-sm transition-all active:scale-98 {% if not uspto_api_key_configured %}opacity-50 cursor-not-allowed{% endif %}" {% if not uspto_api_key_configured %}disabled{% endif %}>
+                                <i class="fa-solid fa-magnifying-glass mr-2"></i> Auf Updates prüfen
+                            </button>
+                            
+                            <button onclick="startDownload()" id="download-btn" class="px-5 py-2.5 rounded-xl bg-gradient-to-r from-yellow-600 to-amber-600 hover:from-yellow-500 hover:to-amber-500 font-medium text-sm transition-all shadow-lg shadow-yellow-500/20 active:scale-98 {% if not uspto_api_key_configured %}opacity-50 cursor-not-allowed{% endif %}" {% if not uspto_api_key_configured %}disabled{% endif %}>
+                                <i class="fa-solid fa-cloud-arrow-down mr-2"></i> 1. XML downloaden
+                            </button>
+                            
+                            <button onclick="startImport()" id="start-import-btn" class="px-5 py-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 font-medium text-sm transition-all shadow-lg shadow-blue-500/20 active:scale-98">
+                                <i class="fa-solid fa-play mr-2"></i> 2. Datenbank updaten
+                            </button>
+                        </div>
                     </div>
                 </div>
 
@@ -325,7 +357,7 @@
                 
                 updateUI(status);
                 
-                if (status.running) {
+                if (status.running || status.downloading) {
                     if (!isPolling) {
                         isPolling = true;
                         startPolling();
@@ -339,28 +371,93 @@
         }
 
         function updateUI(status) {
-            const btn = document.getElementById('start-import-btn');
-            const progressContainer = document.getElementById('import-progress-container');
-            const progressBar = document.getElementById('import-progress-bar');
-            const progressPercent = document.getElementById('import-progress-percent');
+            const downloadBtn = document.getElementById('download-btn');
+            const importBtn = document.getElementById('start-import-btn');
+            const checkUpdateBtn = document.getElementById('check-update-btn');
+            
+            const downloadProgressContainer = document.getElementById('download-progress-container');
+            const downloadProgressBar = document.getElementById('download-progress-bar');
+            const downloadProgressPercent = document.getElementById('download-progress-percent');
+            
+            const importProgressContainer = document.getElementById('import-progress-container');
+            const importProgressBar = document.getElementById('import-progress-bar');
+            const importProgressPercent = document.getElementById('import-progress-percent');
+            
             const badge = document.getElementById('import-status-badge');
             const logsContainer = document.getElementById('import-logs');
             const lastSyncText = document.getElementById('last-sync-date');
+            
+            const updateBanner = document.getElementById('update-banner');
 
+            // Badge status
             if (status.running) {
-                btn.disabled = true;
-                btn.classList.add('opacity-50');
-                btn.innerHTML = '<i class="fa-solid fa-spinner animate-spin mr-2"></i> Sync läuft...';
-                progressContainer.classList.remove('hidden');
-                progressBar.style.width = status.progress + '%';
-                progressPercent.innerText = status.progress + '%';
-                badge.innerHTML = '<span class="h-2.5 w-2.5 rounded-full bg-blue-500 animate-pulse"></span> Synchronisiere';
+                badge.innerHTML = '<span class="h-2.5 w-2.5 rounded-full bg-blue-500 animate-pulse"></span> Importiere...';
+            } else if (status.downloading) {
+                badge.innerHTML = '<span class="h-2.5 w-2.5 rounded-full bg-yellow-500 animate-pulse"></span> Downloade...';
             } else {
-                btn.disabled = false;
-                btn.classList.remove('opacity-50');
-                btn.innerHTML = '<i class="fa-solid fa-play mr-2"></i> Sync manuell starten';
-                progressContainer.classList.add('hidden');
                 badge.innerHTML = '<span class="h-2.5 w-2.5 rounded-full bg-green-500"></span> Bereit';
+            }
+
+            // Download Button and Progress
+            if (status.downloading) {
+                if (downloadBtn) {
+                    downloadBtn.disabled = true;
+                    downloadBtn.classList.add('opacity-50');
+                    downloadBtn.innerHTML = '<i class="fa-solid fa-spinner animate-spin mr-2"></i> Lade...';
+                }
+                if (downloadProgressContainer) {
+                    downloadProgressContainer.classList.remove('hidden');
+                    downloadProgressBar.style.width = status.download_progress + '%';
+                    downloadProgressPercent.innerText = status.download_progress + '%';
+                }
+            } else {
+                if (downloadBtn) {
+                    downloadBtn.disabled = !status.api_key_configured;
+                    if (!status.api_key_configured) {
+                        downloadBtn.classList.add('opacity-50');
+                        downloadBtn.title = "Bitte USPTO_API_KEY in Umgebungsvariablen eintragen.";
+                    } else {
+                        downloadBtn.classList.remove('opacity-50');
+                        downloadBtn.title = "";
+                    }
+                    downloadBtn.innerHTML = '<i class="fa-solid fa-cloud-arrow-down mr-2"></i> 1. XML downloaden';
+                }
+                if (downloadProgressContainer) {
+                    downloadProgressContainer.classList.add('hidden');
+                }
+            }
+
+            // Import Button and Progress
+            if (status.running) {
+                importBtn.disabled = true;
+                importBtn.classList.add('opacity-50');
+                importBtn.innerHTML = '<i class="fa-solid fa-spinner animate-spin mr-2"></i> Importiere...';
+                importProgressContainer.classList.remove('hidden');
+                importProgressBar.style.width = status.progress + '%';
+                importProgressPercent.innerText = status.progress + '%';
+            } else {
+                importBtn.disabled = status.downloading;
+                importBtn.innerHTML = '<i class="fa-solid fa-play mr-2"></i> 2. Datenbank updaten';
+                importProgressContainer.classList.add('hidden');
+            }
+
+            // Disable check update during active processes
+            if (checkUpdateBtn) {
+                checkUpdateBtn.disabled = status.downloading || status.running || !status.api_key_configured;
+            }
+
+            // Update Banner
+            if (updateBanner) {
+                if (!status.api_key_configured) {
+                    updateBanner.className = "p-4 rounded-xl bg-yellow-500/10 border border-yellow-500/30 text-yellow-400 text-sm";
+                    updateBanner.innerHTML = '<i class="fa-solid fa-triangle-exclamation mr-2"></i> <strong>USPTO API-Key fehlt:</strong> Automatischer Download ist deaktiviert. Du kannst XML/ZIP-Dateien per SFTP in <code>scratch/</code> ablegen und importieren.';
+                } else if (status.update_available) {
+                    updateBanner.className = "p-4 rounded-xl bg-blue-500/10 border border-blue-500/30 text-blue-400 text-sm";
+                    updateBanner.innerHTML = `<i class="fa-solid fa-circle-info mr-2"></i> <strong>USPTO Update verfügbar!</strong> Eine neue Datei <code>${status.available_file}</code> steht bereit. Klicke auf "1. XML downloaden".`;
+                } else {
+                    updateBanner.className = "p-4 rounded-xl bg-green-500/10 border border-green-500/30 text-green-400 text-sm";
+                    updateBanner.innerHTML = '<i class="fa-solid fa-circle-check mr-2"></i> <strong>USPTO Datenbank aktuell:</strong> Keine neueren Dateien auf dem Portal gefunden.';
+                }
             }
 
             if (status.last_run) {
@@ -375,7 +472,6 @@
                 status.logs.forEach(log => {
                     const div = document.createElement('div');
                     div.innerText = log;
-                    // Stylize errors in log red
                     if (log.includes("FEHLER") || log.includes("error") || log.includes("Error")) {
                         div.className = "text-red-400";
                     }
@@ -390,12 +486,49 @@
                 await checkStatus();
                 if (!isPolling) {
                     clearInterval(pollInterval);
-                    // Refresh metrics on completion
                     setTimeout(() => {
                         location.reload();
                     }, 1500);
                 }
             }, 1000);
+        }
+
+        async function checkUpdate() {
+            const btn = document.getElementById('check-update-btn');
+            if (btn) {
+                btn.disabled = true;
+                btn.innerHTML = '<i class="fa-solid fa-spinner animate-spin mr-2"></i> Prüfe...';
+            }
+            try {
+                const response = await fetch('/admin/update/check', { method: 'POST' });
+                if (response.ok) {
+                    await checkStatus();
+                } else {
+                    const err = await response.json();
+                    alert(`Update-Prüfung fehlgeschlagen: ${err.detail}`);
+                }
+            } catch (err) {
+                alert(`Fehler beim Senden: ${err.message}`);
+            } finally {
+                if (btn) {
+                    btn.disabled = false;
+                    btn.innerHTML = '<i class="fa-solid fa-magnifying-glass mr-2"></i> Auf Updates prüfen';
+                }
+            }
+        }
+
+        async function startDownload() {
+            try {
+                const response = await fetch('/admin/download/trigger', { method: 'POST' });
+                if (response.ok) {
+                    await checkStatus();
+                } else {
+                    const err = await response.json();
+                    alert(`Download konnte nicht gestartet werden: ${err.detail}`);
+                }
+            } catch (err) {
+                alert(`Fehler beim Senden: ${err.message}`);
+            }
         }
 
         async function startImport() {

@@ -2,10 +2,11 @@ import os
 import zipfile
 import glob
 import logging
+import requests
 import xml.etree.ElementTree as ET
 from datetime import datetime
 from sqlalchemy.dialects.postgresql import insert
-from app.database import USPTOTrademark, SessionLocal
+from app.database import USPTOTrademark, SessionLocal, SystemConfig
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("uspto_importer")
@@ -20,7 +21,16 @@ import_status = {
     "total_records": 0,
     "last_run": None,
     "error": None,
-    "logs": []
+    "logs": [],
+    
+    # Download state
+    "downloading": False,
+    "download_progress": 0,
+    "download_file": "",
+    "update_available": False,
+    "available_file": "",
+    "available_file_url": "",
+    "api_key_configured": False
 }
 
 def log_progress(message: str):
@@ -237,6 +247,7 @@ def run_uspto_import():
         
         # 1. Look for zip files first and unzip them
         zip_files = glob.glob(os.path.join(SCRATCH_DIR, "*.zip"))
+        original_zips = [os.path.basename(zf) for zf in zip_files]
         for zip_file in zip_files:
             log_progress(f"Entpacke ZIP-Archiv: {os.path.basename(zip_file)}")
             with zipfile.ZipFile(zip_file, 'r') as zip_ref:
@@ -264,6 +275,25 @@ def run_uspto_import():
             os.remove(xml_file)
             log_progress(f"XML-Datei {os.path.basename(xml_file)} gelöscht.")
             
+        # Update last_imported_file in SystemConfig
+        last_file_val = ""
+        if import_status["download_file"]:
+            last_file_val = import_status["download_file"]
+        elif original_zips:
+            last_file_val = original_zips[-1]
+        elif xml_files:
+            last_file_val = os.path.basename(xml_files[-1])
+            
+        if last_file_val:
+            config_entry = db.query(SystemConfig).filter(SystemConfig.key == "last_imported_file").first()
+            if not config_entry:
+                config_entry = SystemConfig(key="last_imported_file", value=last_file_val)
+                db.add(config_entry)
+            else:
+                config_entry.value = last_file_val
+            db.commit()
+            log_progress(f"SystemConfig aktualisiert: last_imported_file = {last_file_val}")
+            
         import_status["progress"] = 100
         import_status["last_run"] = datetime.now()
         log_progress("USPTO Synchronisierung erfolgreich abgeschlossen!")
@@ -274,3 +304,122 @@ def run_uspto_import():
     finally:
         db.close()
         import_status["running"] = False
+
+
+def check_uspto_update(api_key: str, db):
+    """Check if a newer bulk file is available on the USPTO Open Data Portal."""
+    if not api_key:
+        import_status["api_key_configured"] = False
+        import_status["update_available"] = False
+        return
+        
+    import_status["api_key_configured"] = True
+    try:
+        url = "https://api.uspto.gov/api/v1/datasets/products/TRTDXFAP"
+        headers = {"X-Api-Key": api_key}
+        response = requests.get(url, headers=headers, timeout=10)
+        
+        if response.status_code in (401, 403):
+            import_status["api_key_configured"] = False
+            import_status["update_available"] = False
+            logger.warning("USPTO API-Key ist ungültig (401/403)")
+            return
+            
+        response.raise_for_status()
+        data = response.json()
+        product_bag = data.get("bulkDataProductBag", [])
+        if not product_bag:
+            logger.warning("Kein bulkDataProductBag in der USPTO API-Antwort gefunden")
+            return
+            
+        file_bag = product_bag[0].get("productFileBag", [])
+        if not file_bag:
+            logger.warning("Kein productFileBag in der USPTO API-Antwort gefunden")
+            return
+            
+        valid_files = [f for f in file_bag if f.get("fileName", "").endswith((".zip", ".xml"))]
+        if not valid_files:
+            return
+            
+        # Sort alphabetically to get latest daily file
+        sorted_files = sorted(valid_files, key=lambda x: x.get("fileName", ""))
+        latest_file = sorted_files[-1]
+        
+        latest_filename = latest_file.get("fileName")
+        latest_file_url = latest_file.get("downloadUrl")
+        
+        import_status["available_file"] = latest_filename
+        import_status["available_file_url"] = latest_file_url
+        
+        last_imported = db.query(SystemConfig).filter(SystemConfig.key == "last_imported_file").first()
+        last_imported_val = last_imported.value if last_imported else ""
+        
+        latest_base = os.path.splitext(latest_filename)[0]
+        last_base = os.path.splitext(last_imported_val)[0] if last_imported_val else ""
+        
+        if latest_base != last_base:
+            import_status["update_available"] = True
+        else:
+            import_status["update_available"] = False
+            
+    except Exception as e:
+        logger.exception("Fehler beim Prüfen auf USPTO-Updates")
+
+
+def run_uspto_download(api_key: str):
+    """Download the latest USPTO bulk file into the scratch directory in the background."""
+    if import_status["downloading"]:
+        log_progress("Download läuft bereits. Abgebrochen.")
+        return
+        
+    import_status["downloading"] = True
+    import_status["download_progress"] = 0
+    import_status["error"] = None
+    
+    db = SessionLocal()
+    try:
+        check_uspto_update(api_key, db)
+        url = import_status["available_file_url"]
+        filename = import_status["available_file"]
+        
+        if not url or not filename:
+            raise Exception("Keine Download-URL oder Dateiname von der USPTO-API erhalten.")
+            
+        log_progress(f"Starte Download von {filename}...")
+        
+        if not os.path.exists(SCRATCH_DIR):
+            os.makedirs(SCRATCH_DIR)
+            
+        dest_path = os.path.join(SCRATCH_DIR, filename)
+        
+        # Start download with stream=True
+        headers = {"X-Api-Key": api_key}
+        response = requests.get(url, headers=headers, stream=True, timeout=30)
+        response.raise_for_status()
+        
+        total_size = int(response.headers.get('content-length', 0))
+        downloaded = 0
+        
+        import_status["download_file"] = filename
+        
+        with open(dest_path, 'wb') as f:
+            for chunk in response.iter_content(chunk_size=8192):
+                if chunk:
+                    f.write(chunk)
+                    downloaded += len(chunk)
+                    if total_size > 0:
+                        import_status["download_progress"] = int((downloaded / total_size) * 100)
+                    else:
+                        # Fallback indicator
+                        import_status["download_progress"] = min(99, int((downloaded / (50 * 1024 * 1024)) * 100))
+                        
+        import_status["download_progress"] = 100
+        log_progress(f"Download abgeschlossen: {filename} ({downloaded} Bytes)")
+    except Exception as e:
+        logger.exception("Fehler beim USPTO Download")
+        import_status["error"] = f"Download-Fehler: {str(e)}"
+        log_progress(f"FEHLER beim Download: {str(e)}")
+    finally:
+        db.close()
+        import_status["downloading"] = False
+

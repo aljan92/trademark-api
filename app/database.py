@@ -48,6 +48,12 @@ class APIStats(Base):
     cache_hit = Column(Boolean)
     timestamp = Column(DateTime, default=datetime.utcnow)
 
+class SystemConfig(Base):
+    __tablename__ = "system_config"
+    
+    key = Column(String(50), primary_key=True, index=True)
+    value = Column(String(255))
+
 def get_db():
     db = SessionLocal()
     try:
