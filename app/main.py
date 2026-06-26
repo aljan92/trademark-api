@@ -185,7 +185,7 @@ async def check_trademark(
             # Cache Miss / Expired -> Query Live API
             # Note: We query the live API without nice_class filter to cache all classes for this keyword
             try:
-                euipo_results = query_euipo_live(keyword, match_type=match_type)
+                euipo_results = await query_euipo_live(keyword, match_type=match_type)
                 
                 # Update Cache
                 if cache_entry:

@@ -1,5 +1,6 @@
 import os
 import logging
+import asyncio
 import requests
 from datetime import datetime
 
@@ -11,15 +12,18 @@ CLIENT_SECRET = os.getenv("EUIPO_CLIENT_SECRET", "")
 USE_SANDBOX = os.getenv("EUIPO_SANDBOX", "true").lower() == "true"
 
 BASE_URL = (
-    "https://dev-sandbox.euipo.europa.eu/v1"
+    "https://dev-sandbox.euipo.europa.eu/trademark-search"
     if USE_SANDBOX
-    else "https://api-gateway.euipo.europa.eu/v1"
+    else "https://api.euipo.europa.eu/trademark-search"
 )
 TOKEN_URL = (
     "https://dev-sandbox.euipo.europa.eu/oauth2/token"
     if USE_SANDBOX
     else "https://api-gateway.euipo.europa.eu/oauth2/token"
 )
+
+# Global lock to serialize all EUIPO API requests to prevent concurrent bursts
+euipo_lock = asyncio.Lock()
 
 def get_access_token():
     """Retrieve OAuth2 token using client_credentials grant type."""
@@ -43,85 +47,122 @@ def get_access_token():
         logger.error(f"Error fetching EUIPO access token: {str(e)}")
         return None
 
-def query_euipo_live(keyword: str, nice_class: int = None, match_type: str = "exact"):
-    """Query the EUIPO Trade Mark Search API."""
-    token = get_access_token()
-    
-    if not token:
-        logger.info(f"Using mock EUIPO data for keyword: '{keyword}' (No credentials provided)")
-        return mock_euipo_response(keyword, nice_class, match_type)
+async def query_euipo_live(keyword: str, nice_class: int = None, match_type: str = "exact"):
+    """Query the EUIPO Trade Mark Search API with rate limiting and serialization."""
+    async with euipo_lock:
+        # Rate limit safety sleep
+        await asyncio.sleep(0.2)
         
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Content-Type": "application/json",
-        "Accept": "application/json"
-    }
-    
-    # Construct search query according to EUIPO REST API schema
-    # For the MVP, we use their standard trademark query structure.
-    # The search endpoint is typically GET /v1/trademarks with query parameters
-    params = {
-        "q": f"markText:{keyword}" if match_type == "exact" else f"markText:*{keyword}*",
-        "limit": 10
-    }
-    
-    if nice_class:
-        params["classNumber"] = nice_class
-        
-    try:
-        # Endpoint: GET /v1/trademarks
-        response = requests.get(f"{BASE_URL}/trademarks", headers=headers, params=params, timeout=10)
-        
-        if response.status_code == 200:
-            return parse_euipo_response(response.json(), keyword)
-        elif response.status_code == 404:
-            return [] # No match found
-        else:
-            logger.error(f"EUIPO API error: {response.status_code} - {response.text}")
-            # Fallback to mock on API error to keep playground functional
+        token = get_access_token()
+        if not token:
+            logger.info(f"Using mock EUIPO data for keyword: '{keyword}' (No credentials provided)")
             return mock_euipo_response(keyword, nice_class, match_type)
-    except Exception as e:
-        logger.error(f"Connection to EUIPO failed: {str(e)}")
+            
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+            "Accept": "application/json"
+        }
+        
+        # Build RSQL query as defined in trademark-search_1.1.0.json spec
+        escaped_keyword = keyword.replace("'", "\\'")
+        if match_type == "exact":
+            rsql_query = f"wordMarkSpecification.verbalElement=='{escaped_keyword}'"
+        else:
+            rsql_query = f"wordMarkSpecification.verbalElement=='*{escaped_keyword}*'"
+            
+        if nice_class:
+            rsql_query += f" and niceClasses=={nice_class}"
+            
+        params = {
+            "query": rsql_query,
+            "size": 10
+        }
+        
+        url = f"{BASE_URL}/trademarks"
+        max_retries = 3
+        
+        for attempt in range(1, max_retries + 1):
+            try:
+                response = requests.get(url, headers=headers, params=params, timeout=10)
+                
+                # Monitor rate limits
+                limit = response.headers.get("X-RateLimit-Limit")
+                remaining = response.headers.get("X-RateLimit-Remaining")
+                reset = response.headers.get("X-RateLimit-Reset")
+                
+                if remaining is not None:
+                    logger.info(f"EUIPO RateLimit: {remaining}/{limit} remaining. Reset in {reset}s.")
+                    try:
+                        if int(remaining) < 2:
+                            cooldown = int(reset) if reset else 2
+                            logger.warning(f"EUIPO Rate limit almost reached. Cooling down for {cooldown}s...")
+                            await asyncio.sleep(cooldown)
+                    except ValueError:
+                        pass
+                
+                if response.status_code == 200:
+                    return parse_euipo_response(response.json(), keyword)
+                elif response.status_code == 404:
+                    return []
+                elif response.status_code == 429:
+                    retry_after_str = response.headers.get("Retry-After")
+                    retry_after = 5
+                    if retry_after_str:
+                        try:
+                            retry_after = int(retry_after_str)
+                        except ValueError:
+                            pass
+                    logger.warning(f"EUIPO Rate Limit reached (429). Attempt {attempt}/{max_retries}. Retry-After: {retry_after}s.")
+                    await asyncio.sleep(retry_after)
+                    continue
+                else:
+                    logger.error(f"EUIPO API error: {response.status_code} - {response.text}")
+                    return mock_euipo_response(keyword, nice_class, match_type)
+            except Exception as e:
+                logger.error(f"Connection to EUIPO failed on attempt {attempt}: {str(e)}")
+                if attempt < max_retries:
+                    await asyncio.sleep(1)
+                else:
+                    return mock_euipo_response(keyword, nice_class, match_type)
+                    
+        logger.warning(f"All {max_retries} attempts failed to query EUIPO. Falling back to mock data.")
         return mock_euipo_response(keyword, nice_class, match_type)
 
 def parse_euipo_response(json_data, keyword):
     """Parse EUIPO API JSON structure into our standardized format."""
     parsed_results = []
-    # EUIPO response usually returns a list of trademark results inside 'results' or similar key
-    results = json_data.get("results", [])
+    
+    # According to trademark-search_1.1.0.json, the root search result returns trademarks array
+    results = json_data.get("trademarks", [])
     
     for item in results:
-        # Standardize field names
         serial = item.get("applicationNumber")
-        word_mark = item.get("markText", keyword)
-        reg_num = item.get("registrationNumber")
+        
+        # Extract wordmark verbal element
+        word_mark = keyword
+        wm_spec = item.get("wordMarkSpecification")
+        if wm_spec and isinstance(wm_spec, dict):
+            word_mark = wm_spec.get("verbalElement", keyword)
+            
         reg_date_str = item.get("registrationDate")
         status = item.get("status", "active").lower()
-        owner = item.get("applicantName") or item.get("ownerName") or "EUIPO Brand Owner"
         
-        # Nice classes list
-        nice_classes = []
-        classes_data = item.get("classes", [])
-        for c in classes_data:
-            if isinstance(c, dict):
-                c_num = c.get("classNumber")
-            else:
-                c_num = c
-            try:
-                nice_classes.append(int(c_num))
-            except (ValueError, TypeError):
-                pass
-                
-        description = ""
-        goods = item.get("goodsAndServices", [])
-        if goods:
-            descriptions = [g.get("descriptionText", "") for g in goods if isinstance(g, dict)]
-            description = ", ".join(descriptions)
+        # Extract applicant name
+        owner = "EUIPO Brand Owner"
+        applicants = item.get("applicants", [])
+        if applicants and isinstance(applicants, list):
+            owner = applicants[0].get("name", "EUIPO Brand Owner")
             
+        # Nice classes (array of integers in the spec)
+        nice_classes = item.get("niceClasses", [])
+        
+        description = f"Nice Classes: {', '.join(str(c) for c in nice_classes)}"
+        
         parsed_results.append({
             "office": "EUIPO",
-            "registry_status": "active" if "registered" in status or "active" in status else "dead",
-            "registration_number": reg_num or serial,
+            "registry_status": "dead" if status in ("dead", "cancelled", "withdrawn", "expired") else "active",
+            "registration_number": serial,
             "registration_date": reg_date_str[:10] if reg_date_str else None,
             "owner": owner,
             "nice_classes": nice_classes,
@@ -132,8 +173,6 @@ def parse_euipo_response(json_data, keyword):
 
 def mock_euipo_response(keyword: str, nice_class: int = None, match_type: str = "exact"):
     """Generates mock response data for testing without API keys."""
-    # We create a simulated match if the keyword contains certain words, to test UI
-    # E.g. "apple" or "adidas" or "nike" or "puma"
     normalized_kw = keyword.lower()
     famous_brands = ["apple", "adidas", "nike", "puma", "amazon", "google"]
     
@@ -142,7 +181,6 @@ def mock_euipo_response(keyword: str, nice_class: int = None, match_type: str = 
     if not is_match:
         return []
         
-    # Generate 1 mock trademark match
     return [{
         "office": "EUIPO",
         "registry_status": "active",
