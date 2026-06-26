@@ -24,6 +24,8 @@ services:
       EUIPO_CLIENT_SECRET: ${EUIPO_CLIENT_SECRET:-}
       EUIPO_SANDBOX: ${EUIPO_SANDBOX:-true}
       TRAEFIK_HOST: ${TRAEFIK_HOST:-localhost}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin_pass}
     depends_on:
       - db
     volumes:
