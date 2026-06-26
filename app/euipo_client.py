@@ -107,7 +107,11 @@ async def query_euipo_live(keyword: str, nice_class: int = None, match_type: str
                         pass
                 
                 if response.status_code == 200:
-                    raw_data = response.json()
+                    try:
+                        raw_data = response.json()
+                    except ValueError as json_err:
+                        logger.error(f"Failed to parse EUIPO JSON response. Status: 200, Body: {response.text}")
+                        raise EUIPOAPIError(502, f"Ungültiges JSON vom EUIPO-Server erhalten. Body: {response.text[:200]}")
                     parsed_data = parse_euipo_response(raw_data, keyword)
                     if return_raw:
                         return parsed_data, raw_data
