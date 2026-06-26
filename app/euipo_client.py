@@ -89,7 +89,7 @@ async def query_euipo_live(keyword: str, nice_class: int = None, match_type: str
         
         for attempt in range(1, max_retries + 1):
             try:
-                response = requests.get(url, headers=headers, params=params, timeout=10)
+                response = requests.get(url, headers=headers, params=params, timeout=10, allow_redirects=False)
                 
                 # Monitor rate limits
                 limit = response.headers.get("X-RateLimit-Limit")
@@ -116,6 +116,10 @@ async def query_euipo_live(keyword: str, nice_class: int = None, match_type: str
                     if return_raw:
                         return parsed_data, raw_data
                     return parsed_data
+                elif response.status_code in (301, 302, 307, 308):
+                    redirect_url = response.headers.get("Location")
+                    logger.warning(f"EUIPO API redirected (3xx) to: {redirect_url}")
+                    raise EUIPOAPIError(response.status_code, f"API umgeleitet (Redirect) auf: {redirect_url}")
                 elif response.status_code == 404:
                     if return_raw:
                         return [], {"source": "euipo_api", "status_code": 404, "message": "No trademarks found"}
